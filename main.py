@@ -5,6 +5,8 @@ import tkinter as tk
 import cv2
 from PIL import Image, ImageTk
 import face_recognition
+import mediapipe as mp
+import numpy as np
 import util
 import csv
 
@@ -18,13 +20,11 @@ class App:
         self.db_path = 'face_data.db'
         self.initialize_db()
 
-        # Open Lecturer Panel Button
         self.lecturer_panel_button = util.get_button(
             self.main_window, 'Lecturer Panel', 'blue', self.open_lecturer_window
         )
         self.lecturer_panel_button.place(x=750, y=250)
 
-        # Webcam display
         self.webcam_label = util.get_img_label(self.main_window)
         self.webcam_label.place(x=10, y=0, width=700, height=500)
         self.add_webcam(self.webcam_label)
@@ -53,22 +53,56 @@ class App:
     def add_webcam(self, label):
         if 'cap' not in self.__dict__:
             self.cap = cv2.VideoCapture(0)
-
         self._label = label
         self.process_webcam()
+
+    def is_hand_raised(self, frame):
+        mp_hands = mp.solutions.hands
+        with mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7) as hands:
+            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = hands.process(image_rgb)
+
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    wrist = hand_landmarks.landmark[0]
+                    middle_finger_tip = hand_landmarks.landmark[12]
+                    if middle_finger_tip.y < wrist.y:
+                        return True
+        return False
 
     def process_webcam(self):
         ret, frame = self.cap.read()
         self.most_recent_capture_arr = frame
-        img_ = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self.most_recent_capture_pil = Image.fromarray(img_)
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self.most_recent_capture_pil = Image.fromarray(img_rgb)
         imgtk = ImageTk.PhotoImage(image=self.most_recent_capture_pil)
         self._label.imgtk = imgtk
         self._label.configure(image=imgtk)
+
+        face_locations = face_recognition.face_locations(img_rgb)
+        face_encodings = face_recognition.face_encodings(img_rgb, face_locations)
+
+        if face_encodings and self.is_hand_raised(frame):
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT student_id, embedding FROM users")
+            rows = cursor.fetchall()
+
+            for face_encoding in face_encodings:
+                for student_id, db_embedding in rows:
+                    db_embedding_np = np.frombuffer(db_embedding, dtype=np.float64)
+                    match = face_recognition.compare_faces([db_embedding_np], face_encoding)[0]
+                    if match:
+                        cursor.execute("SELECT * FROM attendance WHERE student_id = ? AND DATE(timestamp) = DATE('now')", (student_id,))
+                        if not cursor.fetchone():
+                            cursor.execute("INSERT INTO attendance (student_id, action) VALUES (?, 'Check-in')", (student_id,))
+                            conn.commit()
+                            util.msg_box("Attendance", f"Attendance marked for {student_id}")
+            conn.close()
+
         self._label.after(20, self.process_webcam)
 
     def open_lecturer_window(self):
-        # Security Code Prompt
         code_window = tk.Toplevel(self.main_window)
         code_window.title("Lecturer Login")
         code_window.geometry("400x200")
@@ -78,8 +112,7 @@ class App:
         code_entry.pack(pady=5)
 
         def verify_code():
-            entered_code = code_entry.get()
-            if entered_code == "1234":
+            if code_entry.get() == "1234":
                 code_window.destroy()
                 self.show_lecturer_panel()
             else:
@@ -115,7 +148,6 @@ class App:
 
         self.capture_label = util.get_img_label(self.register_new_user_window)
         self.capture_label.place(x=10, y=0, width=700, height=500)
-
         self.add_img_to_label(self.capture_label)
 
         self.entry_text_register_new_user = util.get_entry_text(self.register_new_user_window)

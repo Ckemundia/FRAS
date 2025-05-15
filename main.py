@@ -9,6 +9,10 @@ import mediapipe as mp
 import numpy as np
 import util
 import csv
+import threading
+import time
+import platform
+import subprocess
 
 
 class App:
@@ -16,9 +20,24 @@ class App:
         self.main_window = tk.Tk()
         self.main_window.geometry("1200x600+350+100")
         self.main_window.title("Facial Recognition Attendance System")
+        self.attendance_feedback_label = tk.Label(
+            self.main_window,
+            text="",
+            font=("Arial", 20, "bold"),
+            fg="green",
+            bg="white"
+        )
+        self.attendance_feedback_label.place(x=400, y=520)
 
         self.db_path = 'face_data.db'
         self.initialize_db()
+
+        # ✅ Initialize Mediapipe hands detector once
+        self.mp_hands = mp.solutions.hands
+        self.hands_detector = self.mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
+
+        # ✅ Cache embeddings from DB
+        self.user_embeddings = self.load_user_embeddings()
 
         self.lecturer_panel_button = util.get_button(
             self.main_window, 'Lecturer Panel', 'blue', self.open_lecturer_window
@@ -27,80 +46,200 @@ class App:
 
         self.webcam_label = util.get_img_label(self.main_window)
         self.webcam_label.place(x=10, y=0, width=700, height=500)
-        self.add_webcam(self.webcam_label)
+
+        self.cap = cv2.VideoCapture(0)
+
+        # ✅ Start background thread
+        self.running = True
+        self.thread = threading.Thread(target=self.process_webcam)
+        self.thread.daemon = True
+        self.thread.start()
+        self.last_face_check_time = 0
+        self.face_check_interval = 3  # seconds
+        self.mp_drawing = mp.solutions.drawing_utils  # For visualizing hand landmarks
+        self.recently_marked = {}  # student_id: last_mark_time
+        self.mark_cooldown = 60  # seconds
+        self.last_seen_encoding = None
+        self.recently_marked = {}  # student_id: timestamp
+        self.mark_cooldown = 60
+
+    def play_success_sound(self):
+        try:
+            if platform.system() == "Windows":
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.call(['afplay', '/System/Library/Sounds/Glass.aiff'])
+            else:  # Linux
+                subprocess.call(['aplay', '/usr/share/sounds/alsa/Front_Center.wav'])
+        except:
+            print("🔇 Could not play sound")
 
     def initialize_db(self):
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                student_id TEXT PRIMARY KEY,
-                embedding BLOB
-            )
-        """)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS attendance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id TEXT,
-                action TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(student_id) REFERENCES users(student_id)
-            )
-        """)
+        cursor.execute("""CREATE TABLE IF NOT EXISTS users (
+            student_id TEXT PRIMARY KEY,
+            embedding BLOB
+        )""")
+        cursor.execute("""CREATE TABLE IF NOT EXISTS attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id TEXT,
+            action TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(student_id) REFERENCES users(student_id)
+        )""")
         conn.commit()
         conn.close()
 
-    def add_webcam(self, label):
-        if 'cap' not in self.__dict__:
-            self.cap = cv2.VideoCapture(0)
-        self._label = label
-        self.process_webcam()
+    def load_user_embeddings(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT student_id, embedding FROM users")
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [(sid, np.frombuffer(emb, dtype=np.float64)) for sid, emb in rows]
 
     def is_hand_raised(self, frame):
-        mp_hands = mp.solutions.hands
-        with mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7) as hands:
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = hands.process(image_rgb)
-
-            if results.multi_hand_landmarks:
-                for hand_landmarks in results.multi_hand_landmarks:
-                    wrist = hand_landmarks.landmark[0]
-                    middle_finger_tip = hand_landmarks.landmark[12]
-                    if middle_finger_tip.y < wrist.y:
-                        return True
+        image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands_detector.process(image_rgb)
+        if results.multi_hand_landmarks:
+            print("✅ Hand detected")
+            for hand_landmarks in results.multi_hand_landmarks:
+                wrist = hand_landmarks.landmark[0]
+                tip = hand_landmarks.landmark[12]
+                if tip.y < wrist.y:
+                    print("✅ Hand is raised")
+                    return True
+                else:
+                    print("❌ Hand detected but not raised")
+        else:
+            print("❌ No hand detected")
         return False
 
     def process_webcam(self):
-        ret, frame = self.cap.read()
-        self.most_recent_capture_arr = frame
-        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        self.most_recent_capture_pil = Image.fromarray(img_rgb)
-        imgtk = ImageTk.PhotoImage(image=self.most_recent_capture_pil)
-        self._label.imgtk = imgtk
-        self._label.configure(image=imgtk)
+        while self.running:
+            start = time.time()
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
 
-        face_locations = face_recognition.face_locations(img_rgb)
-        face_encodings = face_recognition.face_encodings(img_rgb, face_locations)
+            self.most_recent_capture_arr = frame.copy()
+            img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            self.most_recent_capture_pil = Image.fromarray(img_rgb)
 
-        if face_encodings and self.is_hand_raised(frame):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT student_id, embedding FROM users")
-            rows = cursor.fetchall()
+            # ✅ Visualize hand landmarks (for debug)
+            image_for_drawing = frame.copy()
+            results = self.hands_detector.process(img_rgb)
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    self.mp_drawing.draw_landmarks(image_for_drawing, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
 
-            for face_encoding in face_encodings:
-                for student_id, db_embedding in rows:
-                    db_embedding_np = np.frombuffer(db_embedding, dtype=np.float64)
-                    match = face_recognition.compare_faces([db_embedding_np], face_encoding)[0]
-                    if match:
-                        cursor.execute("SELECT * FROM attendance WHERE student_id = ? AND DATE(timestamp) = DATE('now')", (student_id,))
-                        if not cursor.fetchone():
-                            cursor.execute("INSERT INTO attendance (student_id, action) VALUES (?, 'Check-in')", (student_id,))
-                            conn.commit()
-                            util.msg_box("Attendance", f"Attendance marked for {student_id}")
-            conn.close()
+            imgtk = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(image_for_drawing, cv2.COLOR_BGR2RGB)))
 
-        self._label.after(20, self.process_webcam)
+            def update_gui():
+                self.webcam_label.imgtk = imgtk
+                self.webcam_label.configure(image=imgtk)
+
+            self.webcam_label.after(0, update_gui)
+
+            # ✅ Run face recognition if hand is raised AND enough time has passed
+            if self.is_hand_raised(frame):
+                now = time.time()
+                if now - self.last_face_check_time > self.face_check_interval:
+                    self.last_face_check_time = now
+
+                    face_locations = face_recognition.face_locations(img_rgb)
+                    face_encodings = face_recognition.face_encodings(img_rgb, face_locations)
+
+                    print(f"🔍 Found {len(face_encodings)} face(s)")
+
+                    for encoding in face_encodings:
+                        # ✅ Skip very similar encoding just processed
+                        if self.last_seen_encoding is not None:
+                            dist = np.linalg.norm(encoding - self.last_seen_encoding)
+                            if dist < 0.3:
+                                print("⚠️ Similar face already processed recently.")
+                                continue
+
+                        self.last_seen_encoding = encoding
+
+                        for student_id, known_encoding in self.user_embeddings:
+                            match = face_recognition.compare_faces([known_encoding], encoding)[0]
+                            if match:
+                                print(f"🎯 Face matched with {student_id}")
+                                self.mark_attendance(student_id)
+                                break
+                            else:
+                                print(f"❌ No match for {student_id}")
+
+            print(f"⏱️ Frame time: {time.time() - start:.2f}s")
+            time.sleep(0.05)
+
+    def mark_attendance(self, student_id):
+        now = datetime.datetime.now()
+
+        # Avoid duplicate marking within cooldown
+        last_mark = self.recently_marked.get(student_id)
+        if last_mark and (now - last_mark).total_seconds() < self.mark_cooldown:
+            print(f"⏳ {student_id} recently marked. Skipping.")
+            self.show_attendance_feedback(f"⏳ Already marked recently")
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            INSERT INTO attendance (student_id, action) VALUES (?, 'Check-in')
+        """, (student_id,))
+        conn.commit()
+        conn.close()
+
+        self.recently_marked[student_id] = now
+        print(f"✅ Attendance marked for {student_id}")
+        self.show_attendance_feedback(f"✔ Marked: {student_id}")
+        self.animate_success()
+
+    def animate_success(self):
+        emoji = "😄"
+        font_size = 50
+        label = tk.Label(
+            self.main_window,
+            text=emoji,
+            font=("Arial", font_size, "bold"),
+            fg="green",
+            bg="white"
+        )
+        label.place(x=650, y=420)
+
+        self.play_success_sound()
+
+        # Animation: fade in, bounce, then fade out
+        steps = 10
+        duration = 500
+        interval = duration // steps
+        bounce_height = 10
+
+        def animate(step=0):
+            if step <= steps:
+                # Fade in + bounce
+                scale = 1.0 + 0.05 * (1 - abs(step - steps // 2) / (steps // 2))
+                size = int(font_size * scale)
+                offset = int(bounce_height * (1 - abs(step - steps // 2) / (steps // 2)))
+                label.config(font=("Arial", size, "bold"))
+                label.place(x=650, y=420 - offset)
+                self.main_window.after(interval, lambda: animate(step + 1))
+            elif step <= 2 * steps:
+                # Fade out
+                fade_step = step - steps
+                gray = int(255 * (fade_step / steps))
+                label.config(fg=f"#{gray:02x}{gray:02x}{gray:02x}")
+                self.main_window.after(interval, lambda: animate(step + 1))
+            else:
+                label.destroy()
+
+        animate()
 
     def open_lecturer_window(self):
         code_window = tk.Toplevel(self.main_window)
@@ -179,6 +318,9 @@ class App:
         conn.commit()
         conn.close()
 
+        # ✅ Update cached embeddings
+        self.user_embeddings.append((student_id, embeddings))
+
         util.msg_box('Success!', 'User was registered successfully!')
         self.register_new_user_window.destroy()
 
@@ -198,7 +340,7 @@ class App:
             return
 
         today = datetime.datetime.now().strftime("%Y-%m-%d")
-        today_logs = [log for log in logs if log[3].startswith(today)]
+        today_logs = [log for log in logs if log[2].startswith(today)]  # timestamp is at index 2
 
         if not today_logs:
             util.msg_box("Attendance Log", "No attendance records for today.")
@@ -208,14 +350,25 @@ class App:
 
         with open(file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(["Student ID", "Unit", "Action", "Timestamp"])
-            for student_id, unit, action, timestamp in today_logs:
-                writer.writerow([student_id, unit, action, timestamp])
+            writer.writerow(["Student ID", "Action", "Timestamp"])
+            for student_id, action, timestamp in today_logs:
+                writer.writerow([student_id, action, timestamp])
 
         util.msg_box("Export Successful", f"Today's attendance saved as:\n{file_path}")
 
+    def show_attendance_feedback(self, message):
+        self.attendance_feedback_label.config(text=message)
+        self.attendance_feedback_label.after(2000, lambda: self.attendance_feedback_label.config(text=""))
+
     def start(self):
+        self.main_window.protocol("WM_DELETE_WINDOW", self.on_close)
         self.main_window.mainloop()
+
+    def on_close(self):
+        self.running = False
+        if hasattr(self, 'cap'):
+            self.cap.release()
+        self.main_window.destroy()
 
 
 if __name__ == "__main__":

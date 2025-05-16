@@ -13,12 +13,12 @@ import threading
 import time
 import platform
 import subprocess
-
+from util import create_animated_emoji
 
 class App:
     def __init__(self):
         self.main_window = tk.Tk()
-        self.main_window.geometry("1200x600+350+100")
+        self.main_window.geometry("1000x600+350+100")
         self.main_window.title("Facial Recognition Attendance System")
         self.attendance_feedback_label = tk.Label(
             self.main_window,
@@ -42,7 +42,7 @@ class App:
         self.lecturer_panel_button = util.get_button(
             self.main_window, 'Lecturer Panel', 'blue', self.open_lecturer_window
         )
-        self.lecturer_panel_button.place(x=750, y=250)
+        self.lecturer_panel_button.place(x=700, y=500)
 
         self.webcam_label = util.get_img_label(self.main_window)
         self.webcam_label.place(x=10, y=0, width=700, height=500)
@@ -76,21 +76,31 @@ class App:
             print("🔇 Could not play sound")
 
     def initialize_db(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""CREATE TABLE IF NOT EXISTS users (
-            student_id TEXT PRIMARY KEY,
-            embedding BLOB
-        )""")
-        cursor.execute("""CREATE TABLE IF NOT EXISTS attendance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            student_id TEXT,
-            action TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(student_id) REFERENCES users(student_id)
-        )""")
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Create users table with name and wallet
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    student_id TEXT PRIMARY KEY,
+                    name TEXT,
+                    wallet TEXT,
+                    embedding BLOB
+                )
+            ''')
+
+            # Create attendance table with more fields
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS attendance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id TEXT,
+                    name TEXT,
+                    date TEXT,
+                    time TEXT,
+                    unit TEXT,
+                    FOREIGN KEY(student_id) REFERENCES users(student_id)
+                )
+            ''')
 
     def load_user_embeddings(self):
         conn = sqlite3.connect(self.db_path)
@@ -201,45 +211,10 @@ class App:
         self.show_attendance_feedback(f"✔ Marked: {student_id}")
         self.animate_success()
 
-    def animate_success(self):
-        emoji = "😄"
-        font_size = 50
-        label = tk.Label(
-            self.main_window,
-            text=emoji,
-            font=("Arial", font_size, "bold"),
-            fg="green",
-            bg="white"
-        )
-        label.place(x=650, y=420)
 
-        self.play_success_sound()
 
-        # Animation: fade in, bounce, then fade out
-        steps = 10
-        duration = 500
-        interval = duration // steps
-        bounce_height = 10
-
-        def animate(step=0):
-            if step <= steps:
-                # Fade in + bounce
-                scale = 1.0 + 0.05 * (1 - abs(step - steps // 2) / (steps // 2))
-                size = int(font_size * scale)
-                offset = int(bounce_height * (1 - abs(step - steps // 2) / (steps // 2)))
-                label.config(font=("Arial", size, "bold"))
-                label.place(x=650, y=420 - offset)
-                self.main_window.after(interval, lambda: animate(step + 1))
-            elif step <= 2 * steps:
-                # Fade out
-                fade_step = step - steps
-                gray = int(255 * (fade_step / steps))
-                label.config(fg=f"#{gray:02x}{gray:02x}{gray:02x}")
-                self.main_window.after(interval, lambda: animate(step + 1))
-            else:
-                label.destroy()
-
-        animate()
+    def animate_success(self, emoji="😄"):
+        create_animated_emoji(self.main_window, self.play_success_sound, emoji=emoji)
 
     def open_lecturer_window(self):
         code_window = tk.Toplevel(self.main_window)
@@ -262,14 +237,11 @@ class App:
 
     def show_lecturer_panel(self):
         self.lecturer_window = tk.Toplevel(self.main_window)
-        self.lecturer_window.title("Lecturer Panel")
-        self.lecturer_window.geometry("1200x600+350+100")
-
-        register_btn = util.get_button(self.lecturer_window, "Register New User", "gray", self.register_new_user, fg='black')
-        register_btn.place(x=800, y=150)
-
-        show_attendance_btn = util.get_button(self.lecturer_window, "Show Attendance", "green", self.show_attendance)
-        show_attendance_btn.place(x=800, y=250)
+        util.build_lecturer_panel(
+            self.lecturer_window,
+            self.register_new_user,
+            self.show_attendance
+        )
 
     def register_new_user(self):
         self.register_new_user_window = tk.Toplevel(self.lecturer_window)
@@ -278,32 +250,45 @@ class App:
         self.accept_button_register_new_user_window = util.get_button(
             self.register_new_user_window, 'Accept', 'green', self.accept_register_new_user
         )
-        self.accept_button_register_new_user_window.place(x=750, y=300)
+        self.accept_button_register_new_user_window.place(x=750, y=320)
 
         self.try_again_button_register_new_user_window = util.get_button(
             self.register_new_user_window, 'Try Again', 'red', self.try_again_register_new_user
         )
-        self.try_again_button_register_new_user_window.place(x=750, y=400)
+        self.try_again_button_register_new_user_window.place(x=750, y=420)
 
         self.capture_label = util.get_img_label(self.register_new_user_window)
         self.capture_label.place(x=10, y=0, width=700, height=500)
         self.add_img_to_label(self.capture_label)
 
-        self.entry_text_register_new_user = util.get_entry_text(self.register_new_user_window)
-        self.entry_text_register_new_user.place(x=750, y=150)
+        # Label and Entry for Full Name
+        self.name_label = tk.Label(self.register_new_user_window, text="Full Name:", font=("Arial", 12))
+        self.name_label.place(x=750, y=50)
+        self.name_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
+        self.name_entry.place(x=750, y=80)
 
-        self.text_label_register_new_user = util.get_text_label(
-            self.register_new_user_window, 'Please, enter Student ID:'
-        )
-        self.text_label_register_new_user.place(x=750, y=70)
+        # Label and Entry for Student ID
+        self.id_label = tk.Label(self.register_new_user_window, text="Student ID:", font=("Arial", 12))
+        self.id_label.place(x=750, y=120)
+        self.id_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
+        self.id_entry.place(x=750, y=150)
+
+        # Label and Entry for Wallet Address
+        self.wallet_label = tk.Label(self.register_new_user_window, text="Wallet Address:", font=("Arial", 12))
+        self.wallet_label.place(x=750, y=190)
+        self.wallet_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
+        self.wallet_entry.place(x=750, y=220)
 
     def try_again_register_new_user(self):
         self.register_new_user_window.destroy()
 
     def accept_register_new_user(self):
-        student_id = self.entry_text_register_new_user.get(1.0, "end-1c").strip()
-        if not student_id:
-            util.msg_box('Error', 'Student ID cannot be empty!')
+        name = self.name_entry.get().strip()
+        student_id = self.id_entry.get().strip()
+        wallet = self.wallet_entry.get().strip()
+
+        if not name or not student_id or not wallet:
+            util.msg_box('Error', 'All fields are required!')
             return
 
         embeddings = face_recognition.face_encodings(self.register_new_user_capture)
@@ -312,15 +297,20 @@ class App:
             return
 
         embeddings = embeddings[0]
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO users (student_id, embedding) VALUES (?, ?)", (student_id, embeddings.tobytes()))
+
+        # Ensure DB has 'name' and 'wallet' fields in users table
+        cursor.execute("ALTER TABLE users ADD COLUMN name TEXT")
+        cursor.execute("ALTER TABLE users ADD COLUMN wallet TEXT")
+
+        cursor.execute("INSERT INTO users (student_id, name, wallet, embedding) VALUES (?, ?, ?, ?)",
+                       (student_id, name, wallet, embeddings.tobytes()))
         conn.commit()
         conn.close()
 
-        # ✅ Update cached embeddings
         self.user_embeddings.append((student_id, embeddings))
-
         util.msg_box('Success!', 'User was registered successfully!')
         self.register_new_user_window.destroy()
 

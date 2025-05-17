@@ -14,6 +14,8 @@ import time
 import platform
 import subprocess
 from util import create_animated_emoji
+from util import show_reward_dashboard
+
 
 class App:
     def __init__(self):

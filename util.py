@@ -3,6 +3,8 @@ import face_recognition
 import numpy as np
 import tkinter as tk
 from tkinter import messagebox
+from tkinter import ttk
+
 
 # --------------------- UI ELEMENT HELPERS ---------------------
 
@@ -117,6 +119,19 @@ def build_lecturer_panel(parent, on_register, on_show_attendance):
         command=on_show_attendance
     ).pack(pady=10)
 
+    # Reward Dashboard Button
+    tk.Button(
+        frame,
+        text="🎁 View Reward Dashboard",
+        font=("Segoe UI", 14),
+        bg="#6c5ce7",
+        fg="white",
+        activebackground="#341f97",
+        padx=20,
+        pady=10,
+        width=25,
+        command=show_reward_dashboard  # ✅ this opens the reward dashboard
+    ).pack(pady=10)
 
 
 def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, emoji="😄"):
@@ -158,3 +173,46 @@ def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, e
             label.destroy()
 
     animate()
+
+
+def show_reward_dashboard():
+    window = tk.Toplevel()
+    window.title("🎁 Reward Dashboard")
+    window.geometry("700x400")
+    window.configure(bg="#f5f6fa")
+
+    title = tk.Label(
+        window,
+        text="🎓 Student Reward Summary",
+        font=("Segoe UI", 20, "bold"),
+        bg="#f5f6fa",
+        fg="#2d3436"
+    )
+    title.pack(pady=10)
+
+    # Table frame
+    table_frame = tk.Frame(window)
+    table_frame.pack(fill="both", expand=True)
+
+    # Table with Scrollbar
+    tree = ttk.Treeview(table_frame, columns=("ID", "Tokens", "NFT Earned", "Wallet"), show="headings")
+    tree.heading("ID", text="Student ID")
+    tree.heading("Tokens", text="Tokens")
+    tree.heading("NFT Earned", text="NFT Awarded")
+    tree.heading("Wallet", text="Wallet Address")
+
+    scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    tree.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    # Fetch data from DB
+    conn = sqlite3.connect("face_data.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT student_id, attendance_days, nft_awarded, wallet_address FROM users")
+    data = cursor.fetchall()
+    conn.close()
+
+    # Insert into table
+    for student_id, tokens, nft, wallet in data:
+        tree.insert("", "end", values=(student_id, tokens, "Yes" if nft else "No", wallet or "N/A"))

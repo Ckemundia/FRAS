@@ -1,0 +1,15 @@
+{
+  "name": "100 Days Attendance NFT",
+  "description": "Awarded for attending 100 days. Verified via facial recognition.",
+  "image": "ipfs://bafkreibghqpaxdqyzhjv6tpj7pm63dy6ykxlljfj2spf57zikkx4srv6xq",
+  "attributes": [
+    {
+      "trait_type": "Attendance Streak",
+      "value": "100 Days"
+    },
+    {
+      "trait_type": "Verified",
+      "value": "Face Recognition"
+    }
+  ]
+}

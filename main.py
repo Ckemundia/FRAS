@@ -15,55 +15,127 @@ import platform
 import subprocess
 from util import create_animated_emoji
 from util import show_reward_dashboard
-
+from util import manual_send_token_reward, mint_nft_if_eligible
+from tkinter import font as tkfont
 
 class App:
     def __init__(self):
         self.main_window = tk.Tk()
         self.main_window.geometry("1000x600+350+100")
         self.main_window.title("Facial Recognition Attendance System")
+
+        # Create a canvas to paint a vertical gradient background
+        self.bg_canvas = tk.Canvas(self.main_window, width=1000, height=600, highlightthickness=0)
+        self.bg_canvas.place(x=0, y=0)
+        self._draw_gradient(self.bg_canvas, 1000, 600, "#6A82FB", "#FC5C7D")
+
+        # Feedback label with shadow effect
+        shadow_offset = 2
+        self.shadow_label = tk.Label(
+            self.main_window,
+            text="",
+            font=("Segoe UI", 22, "bold"),
+            fg="gray30",
+            bg="#FC5C7D"
+        )
+        self.shadow_label.place(x=400+shadow_offset, y=520+shadow_offset)
+
         self.attendance_feedback_label = tk.Label(
             self.main_window,
             text="",
-            font=("Arial", 20, "bold"),
-            fg="green",
-            bg="white"
+            font=("Segoe UI", 22, "bold"),
+            fg="white",
+            bg="#FC5C7D"
         )
         self.attendance_feedback_label.place(x=400, y=520)
+
+        self.lecturer_panel_button = util._create_rounded_button(
+            self.main_window, 'Lecturer Panel', 'white', '#4d4dff', self.open_lecturer_window
+        )
+        self.lecturer_panel_button.place(x=500, y=500)
+        util.add_hover_effect(self.lecturer_panel_button, '#4d4dff', '#6666ff')
+
+        # Webcam label with white bg and subtle border shadow
+        self.webcam_label = util.get_img_label(self.main_window)
+        self.webcam_label.config(bg="white", bd=0, relief="flat")
+        self.webcam_label.place(x=10, y=0, width=700, height=500)
+
+        self.hand_hint_label = util.create_blinking_label(
+            self.main_window,
+            text="👋 Raise your hand to sign",
+            font=("Helvetica", 16, "bold"),
+            fg="#007acc",
+            bg="#6A82FB",
+            x=700,
+            y=200
+        )
 
         self.db_path = 'face_data.db'
         self.initialize_db()
 
-        # ✅ Initialize Mediapipe hands detector once
         self.mp_hands = mp.solutions.hands
         self.hands_detector = self.mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
 
-        # ✅ Cache embeddings from DB
         self.user_embeddings = self.load_user_embeddings()
-
-        self.lecturer_panel_button = util.get_button(
-            self.main_window, 'Lecturer Panel', 'blue', self.open_lecturer_window
-        )
-        self.lecturer_panel_button.place(x=700, y=500)
-
-        self.webcam_label = util.get_img_label(self.main_window)
-        self.webcam_label.place(x=10, y=0, width=700, height=500)
 
         self.cap = cv2.VideoCapture(0)
 
-        # ✅ Start background thread
         self.running = True
         self.thread = threading.Thread(target=self.process_webcam)
         self.thread.daemon = True
         self.thread.start()
         self.last_face_check_time = 0
-        self.face_check_interval = 3  # seconds
-        self.mp_drawing = mp.solutions.drawing_utils  # For visualizing hand landmarks
-        self.recently_marked = {}  # student_id: last_mark_time
-        self.mark_cooldown = 60  # seconds
-        self.last_seen_encoding = None
-        self.recently_marked = {}  # student_id: timestamp
+        self.face_check_interval = 3
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.recently_marked = {}
         self.mark_cooldown = 60
+        self.last_seen_encoding = None
+        self.recently_marked = {}
+        self.mark_cooldown = 60
+
+    def _draw_gradient(self, canvas, width, height, color1, color2):
+        r1, g1, b1 = self.main_window.winfo_rgb(color1)
+        r2, g2, b2 = self.main_window.winfo_rgb(color2)
+        r_ratio = (r2 - r1) / height
+        g_ratio = (g2 - g1) / height
+        b_ratio = (b2 - b1) / height
+        for i in range(height):
+            nr = int(r1 + (r_ratio * i))
+            ng = int(g1 + (g_ratio * i))
+            nb = int(b1 + (b_ratio * i))
+            color = f'#{nr>>8:02x}{ng>>8:02x}{nb>>8:02x}'
+            canvas.create_line(0, i, width, i, fill=color)
+
+    def _create_rounded_button(self, master, text, fg, bg, command):
+        btn = tk.Canvas(master, width=140, height=45, bg=master['bg'], highlightthickness=0)
+        radius = 20
+        width, height = 140, 45
+
+        # Rounded rectangle background
+        btn.create_arc(0, 0, radius*2, radius*2, start=90, extent=90, fill=bg, outline=bg)
+        btn.create_arc(width-radius*2, 0, width, radius*2, start=0, extent=90, fill=bg, outline=bg)
+        btn.create_arc(0, height-radius*2, radius*2, height, start=180, extent=90, fill=bg, outline=bg)
+        btn.create_arc(width-radius*2, height-radius*2, width, height, start=270, extent=90, fill=bg, outline=bg)
+        btn.create_rectangle(radius, 0, width-radius, height, fill=bg, outline=bg)
+        btn.create_rectangle(0, radius, width, height-radius, fill=bg, outline=bg)
+
+        text_item = btn.create_text(width//2, height//2, text=text, fill=fg, font=("Segoe UI", 13, "bold"))
+
+        def on_click(event):
+            command()
+
+        def on_enter(event):
+            btn.config(cursor="hand2")
+            btn.itemconfig(text_item, fill="#ccccff")
+
+        def on_leave(event):
+            btn.config(cursor="")
+            btn.itemconfig(text_item, fill=fg)
+
+        btn.bind("<Button-1>", on_click)
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
 
     def play_success_sound(self):
         try:
@@ -199,12 +271,23 @@ class App:
             self.show_attendance_feedback(f"⏳ Already marked recently")
             return
 
+        # Insert into attendance table
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
         cursor.execute("""
-            INSERT INTO attendance (student_id, action) VALUES (?, 'Check-in')
-        """, (student_id,))
+            INSERT INTO attendance (student_id, date, time, unit)
+            VALUES (?, ?, ?, ?)
+        """, (
+            student_id,
+            now.strftime("%Y-%m-%d"),
+            now.strftime("%H:%M:%S"),
+            "UnitPlaceholder"  # Replace with actual unit logic if needed
+        ))
+
+        # Retrieve wallet address from DB
+        cursor.execute("SELECT wallet FROM users WHERE student_id=?", (student_id,))
+        row = cursor.fetchone()
         conn.commit()
         conn.close()
 
@@ -213,7 +296,33 @@ class App:
         self.show_attendance_feedback(f"✔ Marked: {student_id}")
         self.animate_success()
 
+        # 🪙 Blockchain reward
+        if row and row[0]:
+            wallet_address = row[0]
+            from util import manual_send_token_reward  # Safe import
+            receipt = manual_send_token_reward(wallet_address, 1)
 
+            if receipt:
+                print(f"🎉 Token sent to {wallet_address}")
+            else:
+                print(f"❌ Failed to send token to {wallet_address}")
+        else:
+            print(f"⚠️ No wallet registered for {student_id}")
+
+        # Optional NFT minting if eligible
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM attendance WHERE student_id=?", (student_id,))
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        if count >= 100:
+            token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"  # replace with actual IPFS URI
+            nft_receipt = mint_nft_if_eligible(wallet_address, token_uri)
+            if nft_receipt:
+                print("🖼️ NFT minted!")
+            else:
+                print("❌ NFT minting failed.")
 
     def animate_success(self, emoji="😄"):
         create_animated_emoji(self.main_window, self.play_success_sound, emoji=emoji)
@@ -221,7 +330,18 @@ class App:
     def open_lecturer_window(self):
         code_window = tk.Toplevel(self.main_window)
         code_window.title("Lecturer Login")
-        code_window.geometry("400x200")
+
+        window_width = 400
+        window_height = 200
+
+        # Get the screen's width and height
+        screen_width = code_window.winfo_screenwidth()
+        screen_height = code_window.winfo_screenheight()
+
+        x = int((screen_width / 2) - (window_width / 2))
+        y = int((screen_height / 2) - (window_height / 2))
+
+        code_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
         tk.Label(code_window, text="Enter Security Code:", font=("Arial", 14)).pack(pady=10)
         code_entry = tk.Entry(code_window, font=("Arial", 14), show="*")
@@ -303,9 +423,6 @@ class App:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
-        # Ensure DB has 'name' and 'wallet' fields in users table
-        cursor.execute("ALTER TABLE users ADD COLUMN name TEXT")
-        cursor.execute("ALTER TABLE users ADD COLUMN wallet TEXT")
 
         cursor.execute("INSERT INTO users (student_id, name, wallet, embedding) VALUES (?, ?, ?, ?)",
                        (student_id, name, wallet, embeddings.tobytes()))
@@ -342,9 +459,9 @@ class App:
 
         with open(file_path, mode="w", newline="", encoding="utf-8") as file:
             writer = csv.writer(file)
-            writer.writerow(["Student ID", "Action", "Timestamp"])
-            for student_id, action, timestamp in today_logs:
-                writer.writerow([student_id, action, timestamp])
+            writer.writerow(["Student ID", "Date", "Time"])
+            for student_id, date, time in today_logs:
+                writer.writerow([student_id, date, time])
 
         util.msg_box("Export Successful", f"Today's attendance saved as:\n{file_path}")
 

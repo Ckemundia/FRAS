@@ -4,7 +4,10 @@ import numpy as np
 import tkinter as tk
 from tkinter import messagebox
 from tkinter import ttk
+from tkinter import simpledialog
 
+from blockchain_utils import send_token_to_wallet as _send_token_to_wallet
+from blockchain_utils import mint_student_nft as _mint_student_nft
 
 # --------------------- UI ELEMENT HELPERS ---------------------
 
@@ -37,6 +40,45 @@ def get_entry_text(window):
 def msg_box(title, description):
     messagebox.showinfo(title, description)
 
+def create_blinking_label(parent, text, font, fg, bg, x, y, interval=500):
+    label = tk.Label(parent, text=text, font=font, fg=fg, bg=bg)
+    label.place(x=x, y=y)
+
+    def blink():
+        current_color = label.cget("fg")
+        label.config(fg=bg if current_color != bg else fg)
+        parent.after(interval, blink)
+
+    blink()
+    return label
+def _create_rounded_button(parent, text, fg, bg, command):
+    button = tk.Button(
+        parent,
+        text=text,
+        fg=fg,
+        bg=bg,
+        activebackground="#4d4dff",
+        activeforeground="white",
+        font=("Segoe UI", 12, "bold"),
+        bd=0,
+        relief="flat",
+        padx=15,
+        pady=5,
+        cursor="hand2"
+    )
+    # Rounded effect workaround (you can't truly round buttons in plain Tkinter)
+    button.configure(highlightthickness=0, borderwidth=0)
+    return button
+
+def add_hover_effect(widget, normal_bg, hover_bg):
+    def on_enter(e):
+        widget['background'] = hover_bg
+    def on_leave(e):
+        widget['background'] = normal_bg
+    widget.bind("<Enter>", on_enter)
+    widget.bind("<Leave>", on_leave)
+
+
 # --------------------- FACE RECOGNITION ---------------------
 
 def recognize(img, db_path="face_data.db"):
@@ -65,10 +107,11 @@ def recognize(img, db_path="face_data.db"):
 def get_attendance_logs(db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT student_id, action, timestamp FROM attendance ORDER BY timestamp DESC")
+    cursor.execute("SELECT student_id, date, time FROM attendance ORDER BY date DESC, time DESC")
     logs = cursor.fetchall()
     conn.close()
     return logs
+
 
 # --------------------- LECTURER PANEL UI ---------------------
 
@@ -130,50 +173,27 @@ def build_lecturer_panel(parent, on_register, on_show_attendance):
         padx=20,
         pady=10,
         width=25,
-        command=show_reward_dashboard  # ✅ this opens the reward dashboard
+        command=show_reward_dashboard
     ).pack(pady=10)
 
+    # Fixed Token and NFT buttons
+    tk.Button(
+        frame,
+        text="💰 Send Token",
+        font=("Segoe UI", 14),
+        bg="#fdcb6e",
+        fg="black",
+        command=lambda: _send_token_gui(parent)
+    ).pack(pady=10)
 
-def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, emoji="😄"):
-    font_size = 50
-    label = tk.Label(
-        main_window,
-        text=emoji,
-        font=("Arial", font_size, "bold"),
-        fg="green",
-        bg="white"
-    )
-    label.place(x=x, y=y)
-
-    if play_sound_callback:
-        play_sound_callback()
-
-    # Animation settings
-    steps = 10
-    duration = 500
-    interval = duration // steps
-    bounce_height = 10
-
-    def animate(step=0):
-        if step <= steps:
-            # Fade in + bounce
-            scale = 1.0 + 0.05 * (1 - abs(step - steps // 2) / (steps // 2))
-            size = int(font_size * scale)
-            offset = int(bounce_height * (1 - abs(step - steps // 2) / (steps // 2)))
-            label.config(font=("Arial", size, "bold"))
-            label.place(x=x, y=y - offset)
-            main_window.after(interval, lambda: animate(step + 1))
-        elif step <= 2 * steps:
-            # Fade out
-            fade_step = step - steps
-            gray = int(255 * (fade_step / steps))
-            label.config(fg=f"#{gray:02x}{gray:02x}{gray:02x}")
-            main_window.after(interval, lambda: animate(step + 1))
-        else:
-            label.destroy()
-
-    animate()
-
+    tk.Button(
+        frame,
+        text="🎨 Mint NFT",
+        font=("Segoe UI", 14),
+        bg="#00cec9",
+        fg="black",
+        command=lambda: _mint_nft_gui(parent)
+    ).pack(pady=10)
 
 def show_reward_dashboard():
     window = tk.Toplevel()
@@ -209,10 +229,145 @@ def show_reward_dashboard():
     # Fetch data from DB
     conn = sqlite3.connect("face_data.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT student_id, attendance_days, nft_awarded, wallet_address FROM users")
+
+    # Make sure necessary columns exist
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "attendance_days" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN attendance_days INTEGER DEFAULT 0")
+    if "nft_awarded" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN nft_awarded INTEGER DEFAULT 0")
+    if "wallet" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN wallet TEXT")
+
+    conn.commit()
+
+    # Update attendance_days based on attendance table
+    cursor.execute("SELECT student_id, COUNT(*) FROM attendance GROUP BY student_id")
+    attendance_counts = dict(cursor.fetchall())
+    for sid, count in attendance_counts.items():
+        cursor.execute("UPDATE users SET attendance_days=? WHERE student_id=?", (count, sid))
+    conn.commit()
+
+    cursor.execute("SELECT student_id, attendance_days, nft_awarded, wallet FROM users")
     data = cursor.fetchall()
     conn.close()
 
     # Insert into table
     for student_id, tokens, nft, wallet in data:
         tree.insert("", "end", values=(student_id, tokens, "Yes" if nft else "No", wallet or "N/A"))
+
+
+# --------------------- EMOJI ANIMATION ---------------------
+
+def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, emoji="😄"):
+    font_size = 50
+    label = tk.Label(
+        main_window,
+        text=emoji,
+        font=("Arial", font_size, "bold"),
+        fg="green",
+        bg="white"
+    )
+    label.place(x=x, y=y)
+
+    if play_sound_callback:
+        play_sound_callback()
+
+    steps = 10
+    duration = 500
+    interval = duration // steps
+    bounce_height = 10
+
+    def animate(step=0):
+        if step <= steps:
+            scale = 1.0 + 0.05 * (1 - abs(step - steps // 2) / (steps // 2))
+            size = int(font_size * scale)
+            offset = int(bounce_height * (1 - abs(step - steps // 2) / (steps // 2)))
+            label.config(font=("Arial", size, "bold"))
+            label.place(x=x, y=y - offset)
+            main_window.after(interval, lambda: animate(step + 1))
+        elif step <= 2 * steps:
+            fade_step = step - steps
+            gray = int(255 * (fade_step / steps))
+            label.config(fg=f"#{gray:02x}{gray:02x}{gray:02x}")
+            main_window.after(interval, lambda: animate(step + 1))
+        else:
+            label.destroy()
+
+    animate()
+
+# --------------------- WEB3 WRAPPERS ---------------------
+
+def manual_send_token_reward(wallet_address, amount=1):
+    return _send_token_to_wallet(wallet_address, amount)
+
+def mint_nft_if_eligible(wallet_address, token_uri):
+    return _mint_student_nft(wallet_address, token_uri)
+
+# --------------------- GUI HELPERS FOR WEB3 ---------------------
+
+def prompt_for_student_id(parent):
+    return simpledialog.askstring("Student ID", "Enter Student ID:", parent=parent)
+
+def _send_token_gui(parent):
+    sid = prompt_for_student_id(parent)
+    if not sid:
+        return
+
+    conn = sqlite3.connect("face_data.db")
+    cur = conn.cursor()
+    cur.execute("SELECT wallet FROM users WHERE student_id=?", (sid,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row or not row[0]:
+        messagebox.showerror("Error", "No wallet found for that student.")
+        return
+
+    wallet = row[0]
+    receipt = manual_send_token_reward(wallet, 1)
+    if receipt:
+        messagebox.showinfo("Token Sent", f"Tx hash:\n{receipt.transactionHash.hex()}")
+    else:
+        messagebox.showerror("Error", "Token transfer failed.")
+
+def _mint_nft_gui(parent):
+    sid = prompt_for_student_id(parent)
+    if not sid:
+        return
+
+    conn = sqlite3.connect("face_data.db")
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM attendance WHERE student_id=?", (sid,))
+    count = cur.fetchone()[0]
+    cur.execute("SELECT nft_awarded, wallet FROM users WHERE student_id=?", (sid,))
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        messagebox.showerror("Error", "Student not found.")
+        return
+
+    nft_awarded, wallet = row
+    if nft_awarded:
+        messagebox.showinfo("Already Awarded", "This student already has an NFT.")
+        return
+    if count < 100:
+        messagebox.showinfo("Not Eligible", f"Only {count} attendances — need 100.")
+        return
+
+    token_uri = simpledialog.askstring("Metadata URI", "Enter IPFS tokenURI:", parent=parent)
+    if not token_uri:
+        return
+
+    receipt = mint_nft_if_eligible(wallet, token_uri)
+    if receipt:
+        conn = sqlite3.connect("face_data.db")
+        cur = conn.cursor()
+        cur.execute("UPDATE users SET nft_awarded=1 WHERE student_id=?", (sid,))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("NFT Minted", f"Tx hash:\n{receipt.transactionHash.hex()}")
+    else:
+        messagebox.showerror("Error", "NFT minting failed.")

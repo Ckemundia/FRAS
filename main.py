@@ -24,48 +24,56 @@ class App:
         self.main_window.geometry("1000x600+350+100")
         self.main_window.title("Facial Recognition Attendance System")
 
-        # Create a canvas to paint a vertical gradient background
-        self.bg_canvas = tk.Canvas(self.main_window, width=1000, height=600, highlightthickness=0)
-        self.bg_canvas.place(x=0, y=0)
-        self._draw_gradient(self.bg_canvas, 1000, 600, "#6A82FB", "#FC5C7D")
+        self.main_window.configure(bg="#eaf6f6")
 
-        # Feedback label with shadow effect
-        shadow_offset = 2
+        try:
+            self.bg_canvas.destroy()
+        except AttributeError:
+            pass  # Canvas hasn't been created yet
+
+        # Update feedback labels with matching background
         self.shadow_label = tk.Label(
             self.main_window,
             text="",
             font=("Segoe UI", 22, "bold"),
             fg="gray30",
-            bg="#FC5C7D"
+            bg="#eaf6f6"
         )
-        self.shadow_label.place(x=400+shadow_offset, y=520+shadow_offset)
+        self.shadow_label.place(x=402, y=522)  # Keeping shadow offset
 
         self.attendance_feedback_label = tk.Label(
             self.main_window,
             text="",
             font=("Segoe UI", 22, "bold"),
-            fg="white",
-            bg="#FC5C7D"
+            fg="#004d4d",  # Optional: darker text for contrast
+            bg="#eaf6f6"
         )
         self.attendance_feedback_label.place(x=400, y=520)
 
-        self.lecturer_panel_button = util._create_rounded_button(
-            self.main_window, 'Lecturer Panel', 'white', '#4d4dff', self.open_lecturer_window
+
+        self.lecturer_panel_button = tk.Button(
+            self.main_window, text="Lecturer Panel",
+            bg="#009999", fg="white",
+            font=("Arial", 12, "bold"),
+            activebackground="#007f7f", activeforeground="white",
+            relief="flat",
+            command=self.open_lecturer_window
         )
-        self.lecturer_panel_button.place(x=500, y=500)
-        util.add_hover_effect(self.lecturer_panel_button, '#4d4dff', '#6666ff')
+        self.lecturer_panel_button.place(x=680, y=500, width=200, height=50)
 
-        # Webcam label with white bg and subtle border shadow
+
+        # Webcam label background match
         self.webcam_label = util.get_img_label(self.main_window)
-        self.webcam_label.config(bg="white", bd=0, relief="flat")
-        self.webcam_label.place(x=10, y=0, width=700, height=500)
+        self.webcam_label.config(bg="white", bd=2, relief="groove")  # Optional subtle border
+        self.webcam_label.place(x=10, y=0, width=600, height=400)
 
+        # Update blinking label background to match
         self.hand_hint_label = util.create_blinking_label(
             self.main_window,
             text="👋 Raise your hand to sign",
             font=("Helvetica", 16, "bold"),
             fg="#007acc",
-            bg="#6A82FB",
+            bg="#eaf6f6",
             x=700,
             y=200
         )

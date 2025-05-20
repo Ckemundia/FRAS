@@ -48,7 +48,7 @@ class App:
             fg="#004d4d",  # Optional: darker text for contrast
             bg="#eaf6f6"
         )
-        self.attendance_feedback_label.place(x=400, y=520)
+        self.attendance_feedback_label.place(x=10, y=500)
 
 
         self.lecturer_panel_button = tk.Button(
@@ -59,8 +59,16 @@ class App:
             relief="flat",
             command=self.open_lecturer_window
         )
-        self.lecturer_panel_button.place(x=680, y=500, width=200, height=50)
+        self.lecturer_panel_button.place(x=680, y=400, width=200, height=60)
 
+        self.student_panel_button = tk.Button(
+            self.main_window, text="Student Panel",
+            bg="#009999", fg="white",
+            font=("Arial", 12, "bold"),
+            activebackground="#007f7f", activeforeground="white",
+            relief="flat",
+        )
+        self.student_panel_button.place(x=680, y=500, width=200, height=60)
 
         # Webcam label background match
         self.webcam_label = util.get_img_label(self.main_window)
@@ -74,8 +82,8 @@ class App:
             font=("Helvetica", 16, "bold"),
             fg="#007acc",
             bg="#eaf6f6",
-            x=700,
-            y=200
+            x=680,
+            y=100
         )
 
         self.db_path = 'face_data.db'
@@ -146,16 +154,8 @@ class App:
         return btn
 
     def play_success_sound(self):
-        try:
-            if platform.system() == "Windows":
-                import winsound
-                winsound.MessageBeep(winsound.MB_ICONASTERISK)
-            elif platform.system() == "Darwin":  # macOS
-                subprocess.call(['afplay', '/System/Library/Sounds/Glass.aiff'])
-            else:  # Linux
-                subprocess.call(['aplay', '/usr/share/sounds/alsa/Front_Center.wav'])
-        except:
-            print("🔇 Could not play sound")
+        util.play_success_sound(self)
+
 
     def initialize_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -350,8 +350,9 @@ class App:
         y = int((screen_height / 2) - (window_height / 2))
 
         code_window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        code_window.config(bg="#eaf6f6")
 
-        tk.Label(code_window, text="Enter Security Code:", font=("Arial", 14)).pack(pady=10)
+        tk.Label(code_window, text="Enter Security Code:",bg="#eaf6f6", font=("Arial", 14)).pack(pady=10)
         code_entry = tk.Entry(code_window, font=("Arial", 14), show="*")
         code_entry.pack(pady=5)
 
@@ -366,16 +367,22 @@ class App:
         tk.Button(code_window, text="Submit", font=("Arial", 12), command=verify_code).pack(pady=10)
 
     def show_lecturer_panel(self):
+        self.main_window.withdraw()
         self.lecturer_window = tk.Toplevel(self.main_window)
+
         util.build_lecturer_panel(
             self.lecturer_window,
             self.register_new_user,
-            self.show_attendance
+            self.show_attendance,
+            self.back_to_main_window
+
         )
 
     def register_new_user(self):
+        self.lecturer_window.withdraw()
+
         self.register_new_user_window = tk.Toplevel(self.lecturer_window)
-        self.register_new_user_window.geometry("1200x520+370+120")
+        self.register_new_user_window.geometry("1100x520+370+120")
 
         self.accept_button_register_new_user_window = util.get_button(
             self.register_new_user_window, 'Accept', 'green', self.accept_register_new_user
@@ -388,26 +395,67 @@ class App:
         self.try_again_button_register_new_user_window.place(x=750, y=420)
 
         self.capture_label = util.get_img_label(self.register_new_user_window)
-        self.capture_label.place(x=10, y=0, width=700, height=500)
+        self.capture_label.place(x=10, y=0, width=650, height=500)
         self.add_img_to_label(self.capture_label)
 
         # Label and Entry for Full Name
         self.name_label = tk.Label(self.register_new_user_window, text="Full Name:", font=("Arial", 12))
-        self.name_label.place(x=750, y=50)
+        self.name_label.place(x=750, y=40)
         self.name_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.name_entry.place(x=750, y=80)
+        self.name_entry.place(x=750, y=70)
 
         # Label and Entry for Student ID
         self.id_label = tk.Label(self.register_new_user_window, text="Student ID:", font=("Arial", 12))
-        self.id_label.place(x=750, y=120)
+        self.id_label.place(x=750, y=110)
         self.id_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.id_entry.place(x=750, y=150)
+        self.id_entry.place(x=750, y=140)
 
         # Label and Entry for Wallet Address
         self.wallet_label = tk.Label(self.register_new_user_window, text="Wallet Address:", font=("Arial", 12))
-        self.wallet_label.place(x=750, y=190)
+        self.wallet_label.place(x=750, y=180)
         self.wallet_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.wallet_entry.place(x=750, y=220)
+        self.wallet_entry.place(x=750, y=210)
+
+        #Label and Entry for verify wallet address
+        self.verify_wallet_label = tk.Label(self.register_new_user_window, text="Verify WalletAddress:", font=("Arial", 12))
+        self.verify_wallet_label.place(x=750,y=240)
+        self.verify_wallet_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
+        self.verify_wallet_entry.place(x=750, y=270)
+
+        #Going to main window button
+        self.back_button = tk.Button(
+            self.register_new_user_window,
+            text='🏠Home',
+            bg='#009999',
+            fg='white',
+            font=('Arial', 12),
+            command=self.back_to_main_window
+        )
+
+        self.back_button.place(x=1000, y=10,)
+
+        self.back_button = tk.Button(
+            self.register_new_user_window,
+            text='👈Back',
+            bg='#009999',
+            fg='white',
+            font=('Arial', 12),
+            command=self.back_to_lecturer_panel
+        )
+        self.back_button.place(x=920, y=10)
+
+    def back_to_main_window(self):
+        self.register_new_user_window.destroy()
+        self.lecturer_window.destroy()
+        self.main_window.deiconify()
+
+    def return_home(self):
+        self.lecturer_window.destroy()
+        self.main_window.deiconify()
+
+    def back_to_lecturer_panel(self):
+        self.register_new_user_window.destroy()
+        self.lecturer_window.deiconify()
 
     def try_again_register_new_user(self):
         self.register_new_user_window.destroy()

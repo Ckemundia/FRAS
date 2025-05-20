@@ -2,9 +2,12 @@ import sqlite3
 import face_recognition
 import numpy as np
 import tkinter as tk
+import platform
+import subprocess
 from tkinter import messagebox
 from tkinter import ttk
 from tkinter import simpledialog
+
 
 from blockchain_utils import send_token_to_wallet as _send_token_to_wallet
 from blockchain_utils import mint_student_nft as _mint_student_nft
@@ -115,9 +118,10 @@ def get_attendance_logs(db_path):
 
 # --------------------- LECTURER PANEL UI ---------------------
 
-def build_lecturer_panel(parent, on_register, on_show_attendance):
+def build_lecturer_panel(parent, on_register, on_show_attendance, on_back):
+
     parent.title("Lecturer Panel")
-    parent.geometry("600x400")
+    parent.geometry("600x600")
     parent.config(bg="#eaf6f6")
 
     # Title
@@ -183,6 +187,7 @@ def build_lecturer_panel(parent, on_register, on_show_attendance):
         font=("Segoe UI", 14),
         bg="#fdcb6e",
         fg="black",
+        width=25,
         command=lambda: _send_token_gui(parent)
     ).pack(pady=10)
 
@@ -192,8 +197,24 @@ def build_lecturer_panel(parent, on_register, on_show_attendance):
         font=("Segoe UI", 14),
         bg="#00cec9",
         fg="black",
+        width=25,
         command=lambda: _mint_nft_gui(parent)
     ).pack(pady=10)
+    # Back Button
+    back_button = tk.Button(
+        parent,  # or use a frame if you want it inside one
+        text="🔙Back",
+        font=("Segoe UI", 10),  # smaller font
+        bg="#d63031",
+        fg="white",
+        activebackground="#c0392b",
+        padx=5,
+        pady=3,
+        width=10,  # smaller width
+        command=on_back
+    )
+    back_button.place(x=10, y=20)  # position it exactly
+
 
 def show_reward_dashboard():
     window = tk.Toplevel()
@@ -260,7 +281,7 @@ def show_reward_dashboard():
 
 # --------------------- EMOJI ANIMATION ---------------------
 
-def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, emoji="😄"):
+def create_animated_emoji(main_window, play_sound_callback=None, x=350, y=500, emoji="😄"):
     font_size = 50
     label = tk.Label(
         main_window,
@@ -277,7 +298,7 @@ def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, e
     steps = 10
     duration = 500
     interval = duration // steps
-    bounce_height = 10
+    bounce_height = 50
 
     def animate(step=0):
         if step <= steps:
@@ -296,6 +317,18 @@ def create_animated_emoji(main_window, play_sound_callback=None, x=700, y=500, e
             label.destroy()
 
     animate()
+
+def play_success_sound(self):
+        try:
+            if platform.system() == "Windows":
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.call(['afplay', '/System/Library/Sounds/Glass.aiff'])
+            else:  # Linux
+                subprocess.call(['aplay', '/usr/share/sounds/alsa/Front_Center.wav'])
+        except:
+            print("🔇 Could not play sound")
 
 # --------------------- WEB3 WRAPPERS ---------------------
 

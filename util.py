@@ -69,7 +69,7 @@ def _create_rounded_button(parent, text, fg, bg, command):
         pady=5,
         cursor="hand2"
     )
-    # Rounded effect workaround (you can't truly round buttons in plain Tkinter)
+
     button.configure(highlightthickness=0, borderwidth=0)
     return button
 
@@ -108,17 +108,24 @@ def recognize(img, db_path="face_data.db"):
 # --------------------- ATTENDANCE LOGS ---------------------
 
 def get_attendance_logs(db_path):
+    import sqlite3
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT student_id, date, time FROM attendance ORDER BY date DESC, time DESC")
-    logs = cursor.fetchall()
+
+    try:
+        cursor.execute("SELECT student_id, date, time FROM attendance")
+        logs = cursor.fetchall()
+    except sqlite3.Error as e:
+        print(f"❌ Database error: {e}")
+        logs = []
+
     conn.close()
     return logs
 
 
 # --------------------- LECTURER PANEL UI ---------------------
 
-def build_lecturer_panel(parent, on_register, on_show_attendance, on_back):
+def build_lecturer_panel(parent, on_register_new_user, on_show_attendance, on_back):
 
     parent.title("Lecturer Panel")
     parent.geometry("600x600")
@@ -149,7 +156,7 @@ def build_lecturer_panel(parent, on_register, on_show_attendance, on_back):
         padx=20,
         pady=10,
         width=25,
-        command=on_register
+        command=on_register_new_user
     ).pack(pady=10)
 
     # Show Attendance Button
@@ -214,6 +221,87 @@ def build_lecturer_panel(parent, on_register, on_show_attendance, on_back):
         command=on_back
     )
     back_button.place(x=10, y=20)  # position it exactly
+
+#-----------------Student panel ui-----------------------
+def show_student_panel():
+    window = tk.Toplevel()
+    window.title("👤 Student Panel")
+    window.geometry("600x350")
+    window.configure(bg="#f5f6fa")
+
+    title = tk.Label(
+        window,
+        text="🔎 Check Your Reward Summary",
+        font=("Segoe UI", 18, "bold"),
+        bg="#f5f6fa",
+        fg="#2d3436"
+    )
+    title.pack(pady=10)
+
+    # Input frame
+    input_frame = tk.Frame(window, bg="#f5f6fa")
+    input_frame.pack(pady=5)
+
+    tk.Label(input_frame, text="Enter Student ID:", bg="#f5f6fa", font=("Segoe UI", 12)).pack(side="left", padx=(0, 10))
+    student_id_entry = tk.Entry(input_frame, font=("Segoe UI", 12), width=20)
+    student_id_entry.pack(side="left")
+
+    # Treeview for showing student data
+    tree = ttk.Treeview(window, columns=("ID", "Tokens", "NFT Earned", "Wallet"), show="headings", height=3)
+    tree.heading("ID", text="Student ID")
+    tree.heading("Tokens", text="Tokens")
+    tree.heading("NFT Earned", text="NFT Awarded")
+    tree.heading("Wallet", text="Wallet Address")
+    tree.pack(fill="x", padx=20, pady=20)
+
+    def fetch_student_data():
+        sid = student_id_entry.get().strip()
+        if not sid:
+            tk.messagebox.showwarning("Input Error", "Please enter a Student ID.")
+            return
+
+        conn = sqlite3.connect("face_data.db")
+        cursor = conn.cursor()
+
+        # Ensure columns exist (optional, can skip if guaranteed)
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "attendance_days" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN attendance_days INTEGER DEFAULT 0")
+        if "nft_awarded" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN nft_awarded INTEGER DEFAULT 0")
+        if "wallet" not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN wallet TEXT")
+        conn.commit()
+
+        # Update attendance count before fetching (optional, same logic as your reward dashboard)
+        cursor.execute("SELECT student_id, COUNT(*) FROM attendance GROUP BY student_id")
+        attendance_counts = dict(cursor.fetchall())
+        for student, count in attendance_counts.items():
+            cursor.execute("UPDATE users SET attendance_days=? WHERE student_id=?", (count, student))
+        conn.commit()
+
+        cursor.execute(
+            "SELECT student_id, attendance_days, nft_awarded, wallet FROM users WHERE student_id=?",
+            (sid,)
+        )
+        data = cursor.fetchone()
+        conn.close()
+
+        # Clear previous results
+        for row in tree.get_children():
+            tree.delete(row)
+
+        if data:
+            student_id, tokens, nft, wallet = data
+            tree.insert("", "end", values=(student_id, tokens, "Yes" if nft else "No", wallet or "N/A"))
+        else:
+            tk.messagebox.showinfo("Not Found", f"No data found for Student ID: {sid}")
+
+    # Search button
+    search_button = tk.Button(window, text="Search", font=("Segoe UI", 12, "bold"), bg="#009999", fg="white",
+                              command=fetch_student_data)
+    search_button.pack()
 
 
 def show_reward_dashboard():
@@ -281,7 +369,7 @@ def show_reward_dashboard():
 
 # --------------------- EMOJI ANIMATION ---------------------
 
-def create_animated_emoji(main_window, play_sound_callback=None, x=350, y=500, emoji="😄"):
+def create_animated_emoji(main_window, play_sound_callback=None, x=500, y=500, emoji="😄"):
     font_size = 50
     label = tk.Label(
         main_window,

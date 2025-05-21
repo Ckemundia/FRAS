@@ -18,9 +18,14 @@ from util import show_reward_dashboard
 from util import manual_send_token_reward, mint_nft_if_eligible
 from tkinter import font as tkfont
 import re
+from util import show_student_panel
+
 
 class App:
     def __init__(self):
+        self.back_button = None
+        self.name_label = None
+        self.register_new_user_window = None
         self.main_window = tk.Tk()
         self.main_window.geometry("1000x600+350+100")
         self.main_window.title("Facial Recognition Attendance System")
@@ -68,6 +73,7 @@ class App:
             font=("Arial", 12, "bold"),
             activebackground="#007f7f", activeforeground="white",
             relief="flat",
+            command=show_student_panel
         )
         self.student_panel_button.place(x=680, y=500, width=200, height=60)
         # Spinner label
@@ -113,6 +119,25 @@ class App:
         self.last_seen_encoding = None
         self.recently_marked = {}
         self.mark_cooldown = 60
+
+    def capture_register_frame(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            print("❌ Failed to capture webcam frame")
+            return
+
+        self.register_new_user_capture = frame.copy()
+
+        # Convert for Tkinter display
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb)
+        imgtk = ImageTk.PhotoImage(image=img)
+
+        self.capture_label.imgtk = imgtk
+        self.capture_label.configure(image=imgtk)
+
+        # Keep updating every 100ms
+        self.capture_label.after(100, self.capture_register_frame)
 
     def _draw_gradient(self, canvas, width, height, color1, color2):
         r1, g1, b1 = self.main_window.winfo_rgb(color1)
@@ -354,7 +379,7 @@ class App:
                 success_token = bool(receipt)
 
                 if count >= 100:
-                    token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"
+                    token_uri = "ipfs://bafkreibghqpaxdqyzhjv6tpj7pm63dy6ykxlljfj2spf57zikkx4srv6xq"
                     nft_receipt = mint_nft_if_eligible(wallet_address, token_uri)
                     success_nft = bool(nft_receipt)
 
@@ -413,6 +438,7 @@ class App:
         tk.Button(code_window, text="Submit", font=("Arial", 12), command=verify_code).pack(pady=10)
 
     def show_lecturer_panel(self):
+        print("Showing Lecturer Panel")  # Debug
         self.main_window.withdraw()
         self.lecturer_window = tk.Toplevel(self.main_window)
 
@@ -421,14 +447,12 @@ class App:
             self.register_new_user,
             self.show_attendance,
             self.back_to_main_window
-
         )
 
     def register_new_user(self):
         self.lecturer_window.withdraw()
-
         self.register_new_user_window = tk.Toplevel(self.lecturer_window)
-        self.register_new_user_window.geometry("1100x520+370+120")
+        self.register_new_user_window.geometry("1200x520+370+120")
 
         self.accept_button_register_new_user_window = util.get_button(
             self.register_new_user_window, 'Accept', 'green', self.accept_register_new_user
@@ -441,35 +465,38 @@ class App:
         self.try_again_button_register_new_user_window.place(x=750, y=420)
 
         self.capture_label = util.get_img_label(self.register_new_user_window)
-        self.capture_label.place(x=10, y=0, width=650, height=500)
+        self.capture_label.place(x=10, y=0, width=500, height=500)
         self.add_img_to_label(self.capture_label)
 
         # Label and Entry for Full Name
         self.name_label = tk.Label(self.register_new_user_window, text="Full Name:", font=("Arial", 12))
-        self.name_label.place(x=750, y=40)
+        self.name_label.place(x=750, y=50)
         self.name_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.name_entry.place(x=750, y=70)
+        self.name_entry.place(x=750, y=80)
 
         # Label and Entry for Student ID
         self.id_label = tk.Label(self.register_new_user_window, text="Student ID:", font=("Arial", 12))
-        self.id_label.place(x=750, y=110)
+        self.id_label.place(x=750, y=120)
         self.id_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.id_entry.place(x=750, y=140)
+        self.id_entry.place(x=750, y=150)
 
         # Label and Entry for Wallet Address
         self.wallet_label = tk.Label(self.register_new_user_window, text="Wallet Address:", font=("Arial", 12))
-        self.wallet_label.place(x=750, y=180)
+        self.wallet_label.place(x=750, y=190)
         self.wallet_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.wallet_entry.place(x=750, y=210)
+        self.wallet_entry.place(x=750, y=220)
 
-        #Label and Entry for verify wallet address
-        self.verify_wallet_label = tk.Label(self.register_new_user_window, text="Verify WalletAddress:", font=("Arial", 12))
-        self.verify_wallet_label.place(x=750,y=240)
+        # Verify Wallet Address
+        self.verify_wallet_label = tk.Label(self.register_new_user_window, text="Verify Wallet Address:",
+                                            font=("Arial", 12), bg="#eaf6f6")
+        self.verify_wallet_label.place(x=750, y=260)
+
         self.verify_wallet_entry = tk.Entry(self.register_new_user_window, font=("Arial", 12), width=30)
-        self.verify_wallet_entry.place(x=750, y=270)
+        self.verify_wallet_entry.place(x=750, y=290)
+        self.capture_register_frame()
 
-        #Going to main window button
-        self.back_button = tk.Button(
+        # Back to Main Window
+        self.back_home_button = tk.Button(
             self.register_new_user_window,
             text='🏠Home',
             bg='#009999',
@@ -477,10 +504,10 @@ class App:
             font=('Arial', 12),
             command=self.back_to_main_window
         )
+        self.back_home_button.place(x=1000, y=10)
 
-        self.back_button.place(x=1000, y=10,)
-
-        self.back_button = tk.Button(
+        # Back to Lecturer Panel
+        self.back_to_lecturer_button = tk.Button(
             self.register_new_user_window,
             text='👈Back',
             bg='#009999',
@@ -488,11 +515,10 @@ class App:
             font=('Arial', 12),
             command=self.back_to_lecturer_panel
         )
-        self.back_button.place(x=920, y=10)
+        self.back_to_lecturer_button.place(x=920, y=10)
 
     def back_to_main_window(self):
         self.register_new_user_window.destroy()
-        self.lecturer_window.destroy()
         self.main_window.deiconify()
 
     def return_home(self):
@@ -506,30 +532,29 @@ class App:
     def try_again_register_new_user(self):
         self.register_new_user_window.destroy()
 
-    import re  # Make sure this is at the top of your file
-
     def accept_register_new_user(self):
         name = self.name_entry.get().strip()
         student_id = self.id_entry.get().strip()
         wallet = self.wallet_entry.get().strip()
         verify_wallet = self.verify_wallet_entry.get().strip()
 
-        # validation
         if not name or not student_id or not wallet or not verify_wallet:
             util.msg_box('Error', 'All fields are required!')
             return
 
-        # Check if wallet addresses match
         if wallet != verify_wallet:
-            util.msg_box('Error', 'Wallet addresses do not match. Please verify and try again.')
+            util.msg_box('Error', 'Wallet addresses do not match.')
             return
 
-        # Ethereum wallet format validation
         if not re.fullmatch(r"0x[a-fA-F0-9]{40}", wallet):
             util.msg_box('Error', 'Invalid Ethereum wallet address format.')
             return
 
-        # Face encoding
+        # ✅ Check if webcam frame exists
+        if not hasattr(self, "register_new_user_capture"):
+            util.msg_box('Error', 'No webcam image captured yet. Please wait for the camera to load.')
+            return
+
         embeddings = face_recognition.face_encodings(self.register_new_user_capture)
         if len(embeddings) == 0:
             util.msg_box('Error', 'No face detected. Try again!')
@@ -537,10 +562,8 @@ class App:
 
         embeddings = embeddings[0]
 
-        # Check if wallet already exists
+        # Save to DB...
 
-
-        # Save to database
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("INSERT INTO users (student_id, name, wallet, embedding) VALUES (?, ?, ?, ?)",
@@ -561,7 +584,7 @@ class App:
             return
 
         today = datetime.datetime.now().strftime("%Y-%m-%d")
-        today_logs = [log for log in logs if log[2].startswith(today)]  # timestamp is at index 2
+        today_logs = [log for log in logs if log[1] == today]  # check date column
 
         if not today_logs:
             util.msg_box("Attendance Log", "No attendance records for today.")
@@ -590,6 +613,9 @@ class App:
         if hasattr(self, 'cap'):
             self.cap.release()
         self.main_window.destroy()
+
+    def add_img_to_label(self, capture_label):
+        pass
 
 
 if __name__ == "__main__":

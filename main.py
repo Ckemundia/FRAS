@@ -17,6 +17,7 @@ from util import create_animated_emoji
 from util import show_reward_dashboard
 from util import manual_send_token_reward, mint_nft_if_eligible
 from tkinter import font as tkfont
+import re
 
 class App:
     def __init__(self):
@@ -272,44 +273,54 @@ class App:
     def mark_attendance(self, student_id):
         now = datetime.datetime.now()
 
-        # Avoid duplicate marking within cooldown
+        #  Avoid duplicate marking
         last_mark = self.recently_marked.get(student_id)
         if last_mark and (now - last_mark).total_seconds() < self.mark_cooldown:
             print(f"⏳ {student_id} recently marked. Skipping.")
             self.show_attendance_feedback(f"⏳ Already marked recently")
             return
 
-        # Insert into attendance table
+        # Connect to DB and get name + wallet
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        cursor.execute("SELECT name, wallet FROM users WHERE student_id = ?", (student_id,))
+        row = cursor.fetchone()
 
+        if row:
+            name, wallet_address = row
+        else:
+            print(f"❌ Student ID {student_id} not found in users table.")
+            conn.close()
+            return
+
+        # Insert attendance
         cursor.execute("""
-            INSERT INTO attendance (student_id, date, time, unit)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO attendance (student_id, name, date, time, unit)
+            VALUES (?, ?, ?, ?, ?)
         """, (
             student_id,
+            name,
             now.strftime("%Y-%m-%d"),
             now.strftime("%H:%M:%S"),
-            "UnitPlaceholder"  # Replace with actual unit logic if needed
+            "UnitPlaceholder"
         ))
 
-        # Retrieve wallet address from DB
-        cursor.execute("SELECT wallet FROM users WHERE student_id=?", (student_id,))
-        row = cursor.fetchone()
+        # Count attendance for NFT eligibility (do this *before* closing)
+        cursor.execute("SELECT COUNT(*) FROM attendance WHERE student_id=?", (student_id,))
+        count = cursor.fetchone()[0]
+
         conn.commit()
-        conn.close()
+        conn.close()  # ✅ Close only once at the end of DB operations
 
         self.recently_marked[student_id] = now
-        print(f"✅ Attendance marked for {student_id}")
-        self.show_attendance_feedback(f"✔ Marked: {student_id}")
+        print(f"✅ Attendance marked for {name} ({student_id})")
+        self.show_attendance_feedback(f"✅ Welcome {name}!")
         self.animate_success()
 
-        # 🪙 Blockchain reward
-        if row and row[0]:
-            wallet_address = row[0]
-            from util import manual_send_token_reward  # Safe import
+        #  Blockchain Token Reward
+        if wallet_address:
+            from util import manual_send_token_reward
             receipt = manual_send_token_reward(wallet_address, 1)
-
             if receipt:
                 print(f"🎉 Token sent to {wallet_address}")
             else:
@@ -317,15 +328,10 @@ class App:
         else:
             print(f"⚠️ No wallet registered for {student_id}")
 
-        # Optional NFT minting if eligible
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM attendance WHERE student_id=?", (student_id,))
-        count = cursor.fetchone()[0]
-        conn.close()
-
+        # NFT Minting after 100 attendances
         if count >= 100:
-            token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"  # replace with actual IPFS URI
+            token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"
+            from util import mint_nft_if_eligible
             nft_receipt = mint_nft_if_eligible(wallet_address, token_uri)
             if nft_receipt:
                 print("🖼️ NFT minted!")
@@ -460,15 +466,30 @@ class App:
     def try_again_register_new_user(self):
         self.register_new_user_window.destroy()
 
+    import re  # Make sure this is at the top of your file
+
     def accept_register_new_user(self):
         name = self.name_entry.get().strip()
         student_id = self.id_entry.get().strip()
         wallet = self.wallet_entry.get().strip()
+        verify_wallet = self.verify_wallet_entry.get().strip()
 
-        if not name or not student_id or not wallet:
+        # validation
+        if not name or not student_id or not wallet or not verify_wallet:
             util.msg_box('Error', 'All fields are required!')
             return
 
+        # Check if wallet addresses match
+        if wallet != verify_wallet:
+            util.msg_box('Error', 'Wallet addresses do not match. Please verify and try again.')
+            return
+
+        # Ethereum wallet format validation
+        if not re.fullmatch(r"0x[a-fA-F0-9]{40}", wallet):
+            util.msg_box('Error', 'Invalid Ethereum wallet address format.')
+            return
+
+        # Face encoding
         embeddings = face_recognition.face_encodings(self.register_new_user_capture)
         if len(embeddings) == 0:
             util.msg_box('Error', 'No face detected. Try again!')
@@ -476,27 +497,22 @@ class App:
 
         embeddings = embeddings[0]
 
+        # Check if wallet already exists
+
+
+        # Save to database
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-
-
         cursor.execute("INSERT INTO users (student_id, name, wallet, embedding) VALUES (?, ?, ?, ?)",
                        (student_id, name, wallet, embeddings.tobytes()))
         conn.commit()
         conn.close()
 
+        # Add to local list
         self.user_embeddings.append((student_id, embeddings))
+
         util.msg_box('Success!', 'User was registered successfully!')
         self.register_new_user_window.destroy()
-
-    def add_img_to_label(self, label):
-        if hasattr(self, "most_recent_capture_pil"):
-            imgtk = ImageTk.PhotoImage(image=self.most_recent_capture_pil)
-            label.imgtk = imgtk
-            label.configure(image=imgtk)
-            self.register_new_user_capture = self.most_recent_capture_arr.copy()
-        else:
-            util.msg_box("Error", "No image captured yet. Please try again.")
 
     def show_attendance(self):
         logs = util.get_attendance_logs(self.db_path)

@@ -48,7 +48,7 @@ except Exception as e:
 def send_transaction(txn):
     try:
         signed_txn = w3.eth.account.sign_transaction(txn, private_key=PRIVATE_KEY)
-        tx_hash = w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        tx_hash = w3.eth.send_raw_transaction(signed_txn.raw_transaction)
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
         print(f"✅ Tx successful: {receipt.transactionHash.hex()}")
         return receipt
@@ -59,26 +59,35 @@ def send_transaction(txn):
 # -----------------------------
 # Send ERC-20 Token to Student
 # -----------------------------
-def send_token_to_wallet(student_wallet, amount=1):
+def send_token_to_wallet(wallet, amount=1):
     try:
+        student_wallet = Web3.to_checksum_address(wallet)
         decimals = token_contract.functions.decimals().call()
         amount_wei = int(amount * (10 ** decimals))
         nonce = w3.eth.get_transaction_count(PUBLIC_KEY)
-        txn = token_contract.functions.transfer(student_wallet, amount_wei).build_transaction({
+
+        balance = w3.eth.get_balance(PUBLIC_KEY)
+        print(f"💰 Sender ETH balance: {w3.from_wei(balance, 'ether')} ETH")
+
+        print(f"🔁 Sending {amount} tokens ({amount_wei} wei) to {wallet}")
+
+        txn = token_contract.functions.transfer(wallet, amount_wei).build_transaction({
             'from': PUBLIC_KEY,
             'nonce': nonce,
-            'gas': 200000,
-            'gasPrice': w3.to_wei('10', 'gwei')
+            'gas': 250000,
+            'gasPrice': w3.to_wei('15', 'gwei')
         })
+
         return send_transaction(txn)
     except Exception as e:
         print(f"❌ Token transfer failed: {e}")
         return None
 
+
 # -----------------------------
 # Mint NFT for Student
 # -----------------------------
-def mint_student_nft(student_wallet, uri_override=None):
+def mint_student_nft(wallet, uri_override=None):
     try:
         uri = uri_override if uri_override else token_uri
         if not uri:
@@ -86,7 +95,7 @@ def mint_student_nft(student_wallet, uri_override=None):
             return None
 
         nonce = w3.eth.get_transaction_count(PUBLIC_KEY)
-        txn = nft_contract.functions.mintNFT(student_wallet, uri).build_transaction({
+        txn = nft_contract.functions.mintNFT(wallet, uri).build_transaction({
             'from': PUBLIC_KEY,
             'nonce': nonce,
             'gas': 300000,

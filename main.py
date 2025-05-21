@@ -70,6 +70,10 @@ class App:
             relief="flat",
         )
         self.student_panel_button.place(x=680, y=500, width=200, height=60)
+        # Spinner label
+        self.spinner_label = tk.Label(self.main_window, text="", font=("Arial", 14), bg="#eaf6f6")
+        self.spinner_label.place(x=400, y=460)
+        self.spinner_running = False
 
         # Webcam label background match
         self.webcam_label = util.get_img_label(self.main_window)
@@ -156,6 +160,24 @@ class App:
 
     def play_success_sound(self):
         util.play_success_sound(self)
+
+    def start_spinner(self, message="⏳ Processing"):
+        self.spinner_running = True
+        spinner_frames = ['|', '/', '-', '\\']
+
+        def spin():
+            i = 0
+            while self.spinner_running:
+                spinner_text = f"{message} {spinner_frames[i % len(spinner_frames)]}"
+                self.spinner_label.config(text=spinner_text)
+                i += 1
+                time.sleep(0.1)
+
+        threading.Thread(target=spin, daemon=True).start()
+
+    def stop_spinner(self):
+        self.spinner_running = False
+        self.spinner_label.config(text="")
 
 
     def initialize_db(self):
@@ -318,25 +340,43 @@ class App:
         self.animate_success()
 
         #  Blockchain Token Reward
-        if wallet_address:
-            from util import manual_send_token_reward
-            receipt = manual_send_token_reward(wallet_address, 1)
-            if receipt:
+        # Start spinner before blockchain logic
+        self.start_spinner("🪙 Sending reward")
+
+        # Run reward logic in background to avoid UI freeze
+        def send_rewards():
+            success_token = False
+            success_nft = False
+
+            if wallet_address:
+                from util import manual_send_token_reward, mint_nft_if_eligible
+                receipt = manual_send_token_reward(wallet_address, 1)
+                success_token = bool(receipt)
+
+                if count >= 100:
+                    token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"
+                    nft_receipt = mint_nft_if_eligible(wallet_address, token_uri)
+                    success_nft = bool(nft_receipt)
+
+            self.stop_spinner()
+
+            if success_token:
                 print(f"🎉 Token sent to {wallet_address}")
+                self.show_attendance_feedback("📤Token sent!")
             else:
                 print(f"❌ Failed to send token to {wallet_address}")
-        else:
-            print(f"⚠️ No wallet registered for {student_id}")
+                self.show_attendance_feedback("❌Token failed")
 
-        # NFT Minting after 100 attendances
-        if count >= 100:
-            token_uri = "https://ipfs.io/ipfs/YOUR_TOKEN_URI.json"
-            from util import mint_nft_if_eligible
-            nft_receipt = mint_nft_if_eligible(wallet_address, token_uri)
-            if nft_receipt:
-                print("🖼️ NFT minted!")
-            else:
-                print("❌ NFT minting failed.")
+            if count >= 100:
+                if success_nft:
+                    print("🖼️ NFT minted!")
+                    self.show_attendance_feedback("🖼️ NFT minted!")
+                else:
+                    print("❌ NFT minting failed.")
+                    self.show_attendance_feedback("❌ NFT failed.")
+
+        # Run in background
+        threading.Thread(target=send_rewards, daemon=True).start()
 
     def animate_success(self, emoji="😄"):
         create_animated_emoji(self.main_window, self.play_success_sound, emoji=emoji)
